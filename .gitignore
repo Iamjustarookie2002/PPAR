@@ -53,6 +53,7 @@ path/
 *.xlsx
 *.xls
 *.pdf
+*.numbers
 
 # Logs
 *.log 
