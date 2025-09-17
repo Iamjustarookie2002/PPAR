@@ -1,6 +1,7 @@
 import pandas as pd
 import re
 import colorsys
+from datetime import datetime, date
 from openpyxl import Workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.styles import PatternFill, Alignment, Font, Border, Side
@@ -9,15 +10,16 @@ from openpyxl.drawing.image import Image
 from openpyxl.drawing.spreadsheet_drawing import OneCellAnchor
 from openpyxl.utils.units import pixels_to_EMU
 
-def process_excel_report(df, excel_filename, image_filename=None):
+def process_excel_report(df, excel_filename, visits_df, manual_patient_data=None):
     """
     Main function that creates the Excel file with both sheets.
     This is the ONLY function accessible to main in app.py.
     
     Args:
-        df: DataFrame with the data
+        df: DataFrame with the data from FILES_DAT sheet
         excel_filename: Output Excel filename
-        image_filename: Optional image filename for Sheet1
+        visits_df: DataFrame with patient data from VISITS sheet
+        manual_patient_data: Dictionary with manual patient data (optional)
     """
     wb = Workbook()
     
@@ -32,18 +34,19 @@ def process_excel_report(df, excel_filename, image_filename=None):
     # Create Sheet1 and process it with formulas referencing Sheet2
     ws1 = wb.active
     ws1.title = "Sheet1"
-    process_sheet1_data(ws1, image_filename, summary_start_row, forelimb_start_row)
+    process_sheet1_data(ws1, visits_df, summary_start_row, forelimb_start_row, manual_patient_data)
     
     # Save the workbook
     wb.save(excel_filename)
 
-def process_sheet1_data(ws1, image_filename, summary_start_row, forelimb_start_row):
+def process_sheet1_data(ws1, visits_df, summary_start_row, forelimb_start_row, manual_patient_data=None):
     """
-    Process Sheet1 - insert image and add summary averages table from Sheet2.
+    Process Sheet1 - populate patient data from VISITS sheet and manual inputs, add summary averages table from Sheet2.
     
     Args:
         ws1: Worksheet object for Sheet1
-        image_filename: Optional image filename for Sheet1, if None no image is inserted
+        visits_df: DataFrame with patient data from VISITS sheet
+        manual_patient_data: Dictionary with manual patient data (optional)
     """
     # Set up the dashboard layout
     ws1.row_dimensions[1].height = 30  # Set title row height
@@ -55,51 +58,119 @@ def process_sheet1_data(ws1, image_filename, summary_start_row, forelimb_start_r
     title_cell.alignment = Alignment(horizontal="center", vertical="center")
     
     # Add current date beside the title (small format)
-    from datetime import datetime
     current_date = datetime.now().strftime("%d/%m/%Y")
     date_cell = ws1.cell(row=1, column=4, value=current_date)
     date_cell.font = Font(size=10)
     date_cell.alignment = Alignment(horizontal="center", vertical="center")
     
     patient_info_row = 3
-    image_row = patient_info_row
-    # Add patient information in first column
-    patient_info = [
-        "Name:",
-        "Signalment:",
-        "ID:",
-        "Date:",
-        "BW:"
-    ]
     
-    for row_idx, info in enumerate(patient_info, patient_info_row):
-        info_cell = ws1.cell(row=row_idx, column=1, value=info)
-        info_cell.font = Font(bold=True, size=12)
-        info_cell.alignment = Alignment(horizontal="left", vertical="center")
-    
-    # Insert the user-uploaded image if provided, positioned beside the patient info
-    if image_filename:
-        try:
-            # Use the provided image filename with openpyxl Image
-            img = Image(image_filename)
-            
-            # Size the image to fit beside the patient info (rows 2-6)
-            # Set width to 1.5 columns (approximately 30 pixels per column)
-            img.width = 300  # 1.5 columns * 30 pixels per column
-            img.height = 100  # Height will be adjusted to maintain aspect ratio
-            # Position the image beside the patient info, starting from column 2, row 2
-            ws1.add_image(img, f'B{image_row}')
-            
-        except Exception as e:
-            # If image insertion fails, add a placeholder text
-            placeholder_cell = ws1.cell(row=image_row, column=2, value="[Image Insertion Failed]")
-            placeholder_cell.font = Font(bold=True, size=14)
-            placeholder_cell.alignment = Alignment(horizontal="center", vertical="center")
+    # Extract patient data from VISITS sheet (first row, excluding N3, N2, N1 columns)
+    if not visits_df.empty:
+        # Get the first row of data (excluding N3, N2, N1 columns)
+        patient_data = visits_df.iloc[0]
+        
+        # Extract patient information from VISITS sheet
+        first_name = patient_data.get('First name', '')
+        last_name = patient_data.get('Last name', '')
+        gender = patient_data.get('Gender', '')
+        visits_id = patient_data.get('ID', '')
+        date_of_birth = patient_data.get('Date of birth', '')
+        date_of_visit = patient_data.get('Date of visit', '')
+        body_mass = patient_data.get('Body mass [kg]', '')
+        
+        # Create full name
+        full_name = f"{first_name} {last_name}".strip()
+        
+        # Format date of visit
+        if date_of_visit:
+            if isinstance(date_of_visit, str):
+                visit_date = date_of_visit
+            else:
+                # Handle datetime objects - remove time component
+                visit_date = date_of_visit.strftime("%m/%d/%Y") if hasattr(date_of_visit, 'strftime') else str(date_of_visit)
+        else:
+            visit_date = ''
+        
+        # Format body weight
+        body_weight = f"{body_mass} kg" if body_mass else ''
     else:
-        # No image provided, leave the area empty
-        placeholder_cell = ws1.cell(row=image_row, column=2, value="[No Image Provided]")
-        placeholder_cell.font = Font(bold=True, size=12)
-        placeholder_cell.alignment = Alignment(horizontal="center", vertical="center")
+        # Default values if no data
+        first_name = ''
+        last_name = ''
+        gender = ''
+        visits_id = ''
+        date_of_birth = ''
+        date_of_visit = ''
+        body_mass = ''
+        full_name = ''
+        visit_date = ''
+        body_weight = ''
+    
+    signalment = []
+    # Override with manual patient data if provided
+    if manual_patient_data:
+        # Use manual data if provided, otherwise use VISITS sheet data
+        species = manual_patient_data.get('species', '').strip()
+        breed = manual_patient_data.get('breed', '').strip()
+        color = manual_patient_data.get('color', '').strip()
+        manual_id = manual_patient_data.get('purdue_id', '').strip()
+        primary_dvm = manual_patient_data.get('primary_dvm', '').strip()
+        
+        # Build enhanced signalment with manual data
+        signalment_parts = []
+        if species:
+            signalment_parts.append(f"Species: {species}")
+        if breed:
+            signalment_parts.append(f"Breed: {breed}")
+        if color:
+            signalment_parts.append(f"Color: {color}")
+        
+        signalment = signalment_parts  # Keep as list
+
+    # Add gender, DOB, and age to signalment (regardless of manual data)
+    if gender:
+        signalment.append(f"Gender: {gender}")
+    if date_of_birth:
+        # Convert Timestamp to string if needed
+        if hasattr(date_of_birth, 'strftime'):
+            dob_str = date_of_birth.strftime("%m/%d/%Y")
+        else:
+            dob_str = str(date_of_birth)
+        signalment.append(f"DOB: {dob_str}")  # Use dob_str, not date_of_birth
+        
+        # Also convert date_of_visit if it exists
+        visit_str = None
+        if date_of_visit:
+            if hasattr(date_of_visit, 'strftime'):
+                visit_str = date_of_visit.strftime("%m/%d/%Y")
+            else:
+                visit_str = str(date_of_visit)
+        
+        years, months = calculate_age_years_months(dob_str, visit_str)
+        if years is not None and months is not None:
+            signalment.append(f"Age: {years}y {months}m")
+
+    # Convert signalment list to string
+    signalment = ", ".join(signalment) if signalment else ""
+    
+    # Add patient information labels in column 1 and values in column 3
+    patient_labels = ["Name:", "Signalment:", "MR-ID:", "VisitDate:", "BW:", "PrimaryDVM:", "Purdue-ID:"]
+    patient_values = [full_name, signalment, visits_id, visit_date, body_weight, primary_dvm, manual_id]
+    ws1.merge_cells(f'B{patient_info_row+1}:H{patient_info_row+1}')
+    
+    for row_idx, (label, value) in enumerate(zip(patient_labels, patient_values), patient_info_row):
+        # Add label in column 1
+        label_cell = ws1.cell(row=row_idx, column=1, value=label)
+        label_cell.font = Font(bold=True, size=12)
+        label_cell.alignment = Alignment(horizontal="left", vertical="center")
+        
+        # Add value in column 2
+        value_cell = ws1.cell(row=row_idx, column=2, value=value)
+        value_cell.font = Font(size=12)
+        value_cell.alignment = Alignment(horizontal="left", vertical="center")
+    
+    # No image insertion - leave the area empty or add a placeholder
     
     # Insert the fixed DogTopView.png above the summary table
     try:
@@ -109,15 +180,13 @@ def process_sheet1_data(ws1, image_filename, summary_start_row, forelimb_start_r
         # Size the image to fit above the summary table
         dog_img.width = 130  # 1.5 columns wide
         dog_img.height = 400  # Maintain aspect ratio
-        dog_image_row = patient_info_row + 6
+        dog_image_row = patient_info_row + 9
         # Position above the summary table
         ws1.add_image(dog_img, f'B{dog_image_row}')
         
     except Exception as e:
         # If DogTopView.png is not found, add a placeholder
         placeholder_cell = ws1.cell(row=dog_image_row, column=2, value="[DogTopView.png not found]")
-        placeholder_cell.font = Font(bold=True, size=12)
-        placeholder_cell.alignment = Alignment(horizontal="center", vertical="center")
 
     cell_lf = ws1.cell(row=dog_image_row+5, column=1)
     cell_lf.fill = PatternFill(start_color='CCCCFF', end_color='CCCCFF', fill_type='solid')
@@ -207,7 +276,7 @@ def process_sheet1_data(ws1, image_filename, summary_start_row, forelimb_start_r
     
 
     # Add Forelimb/Hindlimb summary below the main summary table
-    forelimb_start_row_sheet1 = patient_info_row + 13
+    forelimb_start_row_sheet1 = dog_image_row + 7
     ws1.merge_cells(f'C{forelimb_start_row_sheet1}:D{forelimb_start_row_sheet1}')
     forelimb_cell = ws1.cell(row=forelimb_start_row_sheet1, column=3, value="Symmetry Index (SI)")
     forelimb_cell.font = Font(bold=True, size=14)
@@ -641,3 +710,68 @@ def get_dim_color_for_number(n):
     saturation = 0.5  # Less saturated
     r, g, b = colorsys.hls_to_rgb(hue, lightness, saturation)
     return f"{int(r*255):02X}{int(g*255):02X}{int(b*255):02X}"
+
+
+def calculate_age_years_months(date_of_birth_str, date_of_visit_str=None):
+    """
+    Calculate age in years and months from date of birth.
+    
+    Args:
+        date_of_birth_str: Date of birth in format like "4/1/18" or "4/1/2018"
+        date_of_visit_str: Date of visit in format like "8/21/25" or "8/21/2025" (optional)
+    
+    Returns:
+        Tuple of (years, months)
+    """
+    try:
+        # Parse date of birth
+        dob_parts = date_of_birth_str.split('/')
+        month, day, year = dob_parts[0], dob_parts[1], dob_parts[2]
+        
+        # Handle 2-digit years (assume 20xx for years < 50, 19xx for years >= 50)
+        if len(year) == 2:
+            year_int = int(year)
+            if year_int < 50:
+                year = f"20{year}"
+            else:
+                year = f"19{year}"
+        
+        dob = date(int(year), int(month), int(day))
+        
+        # Use date of visit if provided, otherwise use current date
+        if date_of_visit_str:
+            visit_parts = date_of_visit_str.split('/')
+            visit_month, visit_day, visit_year = visit_parts[0], visit_parts[1], visit_parts[2]
+            
+            # Handle 2-digit years for visit date
+            if len(visit_year) == 2:
+                visit_year_int = int(visit_year)
+                if visit_year_int < 50:
+                    visit_year = f"20{visit_year}"
+                else:
+                    visit_year = f"19{visit_year}"
+            
+            visit_date = date(int(visit_year), int(visit_month), int(visit_day))
+        else:
+            visit_date = date.today()
+        
+        # Calculate years and months
+        years = visit_date.year - dob.year
+        months = visit_date.month - dob.month
+        
+        # Adjust if birthday hasn't occurred yet this year
+        if visit_date.day < dob.day:
+            months -= 1
+        
+        # Adjust years if months is negative
+        if months < 0:
+            years -= 1
+            months += 12
+            
+        return years, months
+        
+    except Exception as e:
+        print(f"Error calculating age: {e}")
+        return None, None
+
+

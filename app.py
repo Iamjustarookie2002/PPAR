@@ -27,24 +27,34 @@ def main():
     if 'processing_complete' not in st.session_state:
         st.session_state.processing_complete = False
     
-    # File uploaders - vertical layout instead of columns
-    uploaded_file = st.file_uploader("Choose the raw-data excel file", type=['xlsx', 'xls'], help="Upload Excel file")
+    # File uploader - only for Excel file now
+    uploaded_file = st.file_uploader("Choose the raw-data excel file", type=['xlsx', 'xls'], help="Upload Excel file with FILES_DAT and VISITS sheets")
     
-    uploaded_image = st.file_uploader("Choose an image for the patient data (optional)", type=['png', 'jpg', 'jpeg'], help="Upload image for Sheet1")
+    # Optional patient information input section
+    st.subheader("📋 Optional Patient Information")
+    st.write("Fill in the patient details below (optional):")
+    
+    # Create two columns for better layout
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        species = st.text_input("Species")
+        breed = st.text_input("Breed")
+        color = st.text_input("Color")
+    
+    with col2:
+        purdue_id = st.text_input("Purdue_ID")
+        primary_dvm = st.text_input("Primary DVM")
     
     # Add a button to generate reports
     if uploaded_file is not None:
-        # st.success("✅ Excel file uploaded successfully!")
-        if uploaded_image is not None:
-            # st.success("✅ Image file uploaded successfully!")
-            pass
-        
         # Generate Reports button
         if st.button("Generate Report", type="secondary", use_container_width=True):
             try:
                 with st.spinner("Processing your file and generating report..."):
-                    # Read the Excel file
-                    df = pd.read_excel(uploaded_file, sheet_name="FILES_DAT")
+                    # Read the Excel file - both sheets
+                    df_files_dat = pd.read_excel(uploaded_file, sheet_name="FILES_DAT")
+                    df_visits = pd.read_excel(uploaded_file, sheet_name="VISITS")
                     
                     # Create output filenames
                     base_name = uploaded_file.name.replace('.xlsx', '').replace('.xls', '')
@@ -56,20 +66,17 @@ def main():
                     temp_excel = tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx")
                     temp_excel.close()
                     
-                    # Call process_excel_report with image data if provided
-                    if uploaded_image is not None:
-                        # Save uploaded image to temporary file
-                        temp_image = tempfile.NamedTemporaryFile(delete=False, suffix=f".{uploaded_image.name.split('.')[-1]}")
-                        temp_image.write(uploaded_image.getvalue())
-                        temp_image.close()
-                        
-                        # Process Excel with the temporary image file
-                        process_excel_report(df, temp_excel.name, temp_image.name)
-                        
-                        # Clean up temporary image file AFTER Excel processing is complete
-                        os.unlink(temp_image.name)
-                    else:
-                        process_excel_report(df, temp_excel.name, None)
+                    # Prepare manual patient data
+                    manual_patient_data = {
+                        'species': species,
+                        'breed': breed,
+                        'color': color,
+                        'purdue_id': purdue_id,
+                        'primary_dvm': primary_dvm
+                    }
+                    
+                    # Process Excel with patient data from VISITS sheet and manual inputs
+                    process_excel_report(df_files_dat, temp_excel.name, df_visits, manual_patient_data)
                     
                     # Create PDF report from Sheet1 of the processed Excel file
                     # pdf_data = process_pdf_report(temp_excel.name, uploaded_file.name)
@@ -121,7 +128,7 @@ def main():
             st.rerun()
     
     elif not st.session_state.processing_complete:
-        st.info("👆 Please upload an Excel file to get started!")
+        st.info("Please upload the raw-data excel file to get started!")
 
 if __name__ == "__main__":
-    main() 
+    main()
