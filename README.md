@@ -20,25 +20,87 @@ The app processes your Excel data by:
 
 ## Installation
 
+### 🚀 Quick Setup (Recommended)
+
+**For macOS/Linux:**
+```bash
+./setup.sh
+```
+
+**For Windows:**
+```batch
+setup.bat
+```
+
+These scripts will automatically:
+- Create a virtual environment
+- Install all dependencies
+- Set up everything you need
+
+### 📋 Manual Setup (Alternative)
+
 1. **Clone or download this repository**
 
-2. **Install the required dependencies:**
+2. **Create a virtual environment:**
+   ```bash
+   python -m venv venv
+   ```
+
+3. **Activate the virtual environment:**
+   
+   **On macOS/Linux:**
+   ```bash
+   source venv/bin/activate
+   ```
+   
+   **On Windows:**
+   ```bash
+   venv\Scripts\activate
+   ```
+
+4. **Install the required dependencies:**
    ```bash
    pip install -r requirements.txt
    ```
 
 ## Usage
 
-1. **Run the Streamlit app:**
+### 🚀 Quick Start
+
+**For macOS/Linux:**
+```bash
+./run_app.sh
+```
+
+**For Windows:**
+```batch
+run_app.bat
+```
+
+### 📋 Manual Run
+
+1. **Activate the virtual environment** (if not already active):
+   
+   **On macOS/Linux:**
+   ```bash
+   source venv/bin/activate
+   ```
+   
+   **On Windows:**
+   ```bash
+   venv\Scripts\activate
+   ```
+
+2. **Run the Streamlit app:**
    ```bash
    streamlit run app.py
    ```
 
-2. **Open your browser** and navigate to the URL shown in the terminal (usually `http://localhost:8501`)
+3. **Open your browser** and navigate to the URL shown in the terminal (usually `http://localhost:8501`)
 
-3. **Upload an Excel file** using the sidebar file uploader
+4. **Upload an Excel file** using the sidebar file uploader
 
-4. **View the processed data** and download the result
+5. **View the processed data** and download the result
 
 ## Customization
 
