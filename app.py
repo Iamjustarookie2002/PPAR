@@ -100,6 +100,15 @@ def main():
             
             except Exception as e:
                 st.error(f"❌ Error processing file: {str(e)}")
+                st.warning("💡 **Troubleshooting tips:**")
+                st.write("• Make sure your Excel file has the required sheets: 'FILES_DAT' and 'VISITS'")
+                st.write("• Check that the 'FILES_DAT' sheet has the required columns:")
+                st.write("  - File comment")
+                st.write("  - Maximum force (normalized to BW) /Total object/ [%BW]")
+                st.write("  - Force-time integral (normalized to BW) /Total object/ [%BW*s]")
+                st.write("  - Contact time/TO [ms]")
+                st.write("• If some data is missing, the app will use default values (0) for calculations")
+                st.write("• Try uploading a different Excel file or check the file format")
     
     # Show download buttons if processing is complete
     if st.session_state.processing_complete and st.session_state.excel_data:

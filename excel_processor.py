@@ -21,23 +21,39 @@ def process_excel_report(df, excel_filename, visits_df, manual_patient_data=None
         visits_df: DataFrame with patient data from VISITS sheet
         manual_patient_data: Dictionary with manual patient data (optional)
     """
-    wb = Workbook()
-    
-    # Create Sheet2 first and process it with all data
-    ws2 = wb.create_sheet("Sheet2")
-    num_data_rows = process_sheet2_data(df, ws2)
-    
-    # Calculate the row numbers for summary tables in Sheet2
-    summary_start_row = num_data_rows + 6  # Main data + gap + summary table start
-    forelimb_start_row = num_data_rows + 10  # SI values are always at rows 16 and 17 in Sheet2
-    
-    # Create Sheet1 and process it with formulas referencing Sheet2
-    ws1 = wb.active
-    ws1.title = "Sheet1"
-    process_sheet1_data(ws1, visits_df, summary_start_row, forelimb_start_row, manual_patient_data)
-    
-    # Save the workbook
-    wb.save(excel_filename)
+    try:
+        wb = Workbook()
+        
+        # Create Sheet2 first and process it with all data
+        ws2 = wb.create_sheet("Sheet2")
+        num_data_rows = process_sheet2_data(df, ws2)
+        
+        # Calculate the row numbers for summary tables in Sheet2
+        summary_start_row = num_data_rows + 6  # Main data + gap + summary table start
+        forelimb_start_row = num_data_rows + 10  # SI values are always at rows 16 and 17 in Sheet2
+        
+        # Create Sheet1 and process it with formulas referencing Sheet2
+        ws1 = wb.active
+        ws1.title = "Sheet1"
+        process_sheet1_data(ws1, visits_df, summary_start_row, forelimb_start_row, manual_patient_data)
+        
+        # Save the workbook
+        wb.save(excel_filename)
+        
+    except Exception as e:
+        print(f"Error in process_excel_report: {e}")
+        # Create a minimal workbook with error message
+        try:
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Error"
+            ws.cell(row=1, column=1, value=f"Error processing file: {str(e)}")
+            wb.save(excel_filename)
+        except:
+            # If even saving fails, create a simple text file
+            with open(excel_filename.replace('.xlsx', '_error.txt'), 'w') as f:
+                f.write(f"Error processing file: {str(e)}")
+        raise e
 
 def process_sheet1_data(ws1, visits_df, summary_start_row, forelimb_start_row, manual_patient_data=None):
     """
@@ -358,28 +374,82 @@ def process_sheet2_data(df, ws2):
     return num_data_rows
 
 def process_original_excel_data(df):
-    """Process and filter the original Excel data."""
-    processed_df = df.copy()
+    """Process and filter the original Excel data with robust error handling."""
+    try:
+        processed_df = df.copy()
 
-    # Filter out rows with '.dat' in "File short name"
-    processed_df = processed_df[~processed_df["File short name"].str.endswith(".dat", na=False)]
+        # Filter out rows with '.dat' in "File short name"
+        if "File short name" in processed_df.columns:
+            processed_df = processed_df[~processed_df["File short name"].str.endswith(".dat", na=False)]
 
-    # Select and rename required columns
-    column_mapping = {
-        "File comment": "Data Source",
-        "Maximum force (normalized to BW) /Total object/ [%BW]": "Maximum force [%BW]",
-        "Force-time integral (normalized to BW) /Total object/ [%BW*s]": "Force-time integral [%BW*s]",
-        "Contact time/TO [ms]": "Contact time/TO [ms]",
-    }
-    
-    processed_df = processed_df[list(column_mapping.keys())].rename(columns=column_mapping)
+        # Select and rename required columns with error handling
+        column_mapping = {
+            "File comment": "Data Source",
+            "Maximum force (normalized to BW) /Total object/ [%BW]": "Maximum force [%BW]",
+            "Force-time integral (normalized to BW) /Total object/ [%BW*s]": "Force-time integral [%BW*s]",
+            "Contact time/TO [ms]": "Contact time/TO [ms]",
+        }
+        
+        # Check which columns exist and only use available ones
+        available_columns = []
+        for original_col, new_col in column_mapping.items():
+            if original_col in processed_df.columns:
+                available_columns.append(original_col)
+            else:
+                print(f"Warning: Column '{original_col}' not found in data")
+        
+        if not available_columns:
+            raise ValueError("No required columns found in the Excel file")
+        
+        processed_df = processed_df[available_columns].rename(columns=column_mapping)
 
-    # Convert LF1 -> LF_1, LH2 -> LH_2, etc.
-    processed_df["Data Source"] = processed_df["Data Source"].apply(
-        lambda x: re.sub(r'([A-Z]+)(\d+)', r'\1_\2', str(x))
-    )
+        # Handle missing data by filling with appropriate defaults
+        for col in processed_df.columns:
+            if col != "Data Source":  # Don't fill text columns
+                # Fill numeric columns with 0 for missing values
+                processed_df[col] = pd.to_numeric(processed_df[col], errors='coerce').fillna(0)
 
-    return processed_df
+        # Convert LF1 -> LF_1, LH2 -> LH_2, etc. with error handling
+        if "Data Source" in processed_df.columns:
+            processed_df["Data Source"] = processed_df["Data Source"].apply(
+                lambda x: re.sub(r'([A-Z]+)(\d+)', r'\1_\2', str(x)) if pd.notna(x) else "Unknown"
+            )
+        else:
+            # Create a default Data Source column if missing
+            processed_df["Data Source"] = [f"Data_{i+1}" for i in range(len(processed_df))]
+
+        # Filter out rows where all numeric columns are empty (0)
+        # Keep rows that have at least one non-zero value in numeric columns
+        numeric_columns = [col for col in processed_df.columns if col != "Data Source"]
+        if numeric_columns:
+            # Create a mask for rows that have at least one non-zero value in numeric columns
+            has_data_mask = (processed_df[numeric_columns] != 0).any(axis=1)
+            original_count = len(processed_df)
+            processed_df = processed_df[has_data_mask].reset_index(drop=True)
+            
+            print(f"Filtered out {original_count - len(processed_df)} empty rows")
+            
+            # If all rows were empty, keep at least one row with default values
+            if len(processed_df) == 0:
+                print("All rows were empty, keeping one default row")
+                processed_df = pd.DataFrame({
+                    "Data Source": ["LF_1", "LH_1", "RF_1", "RH_1"],
+                    "Maximum force [%BW]": [0, 0, 0, 0],
+                    "Force-time integral [%BW*s]": [0, 0, 0, 0],
+                    "Contact time/TO [ms]": [0, 0, 0, 0]
+                })
+
+        return processed_df
+        
+    except Exception as e:
+        print(f"Error processing Excel data: {e}")
+        # Return a minimal DataFrame with default values
+        return pd.DataFrame({
+            "Data Source": ["LF_1", "LH_1", "RF_1", "RH_1"],
+            "Maximum force [%BW]": [0, 0, 0, 0],
+            "Force-time integral [%BW*s]": [0, 0, 0, 0],
+            "Contact time/TO [ms]": [0, 0, 0, 0]
+        })
 
 def add_additional_columns_to_sheet2(ws2, num_data_rows):
     """Add additional columns to the right of Sheet2."""
@@ -419,76 +489,92 @@ def add_additional_columns_to_sheet2(ws2, num_data_rows):
         ws2.cell(row=row_idx, column=7, value="").alignment = Alignment(horizontal="center", vertical="center")
 
 def write_weight_bearing_formulae(ws2, num_data_rows):
-    """Write weight bearing formulae for all rows."""
-    # Weight bearing formula: IFERROR(ROUND((current_cell/SUM(range))*100, 0), "")
-    # We need to group rows by 4 (LF, LH, RF, RH)
-    
-    for group_start in range(2, num_data_rows + 2, 4):  # Start from row 2, increment by 4
-        if group_start + 3 <= num_data_rows + 1:  # Make sure we have 4 rows
-            # Get the range for this group (4 rows)
-            range_start = f"B{group_start}"
-            range_end = f"B{group_start + 3}"
-            range_reference = f"{range_start}:{range_end}"
-            
-            # Write formula for each row in the group
-            for row_offset in range(4):
-                current_row = group_start + row_offset
-                if current_row <= num_data_rows + 1:
-                    current_cell = f"B{current_row}"
-                    weight_bearing_formula = f'=IFERROR(ROUND(({current_cell}/SUM({range_reference}))*100, 0), "")'
-                    cell = ws2.cell(row=current_row, column=6, value=weight_bearing_formula)  # Column F
-                    cell.data_type = 'f'  # Explicitly set as formula
+    """Write weight bearing formulae for all rows with error handling."""
+    try:
+        # Weight bearing formula: IFERROR(ROUND((current_cell/SUM(range))*100, 0), "")
+        # We need to group rows by 4 (LF, LH, RF, RH)
+        
+        for group_start in range(2, num_data_rows + 2, 4):  # Start from row 2, increment by 4
+            if group_start + 3 <= num_data_rows + 1:  # Make sure we have 4 rows
+                # Get the range for this group (4 rows)
+                range_start = f"B{group_start}"
+                range_end = f"B{group_start + 3}"
+                range_reference = f"{range_start}:{range_end}"
+                
+                # Write formula for each row in the group
+                for row_offset in range(4):
+                    current_row = group_start + row_offset
+                    if current_row <= num_data_rows + 1:
+                        current_cell = f"B{current_row}"
+                        # Enhanced formula with better error handling
+                        weight_bearing_formula = f'=IFERROR(IF(SUM({range_reference})=0, 0, ROUND(({current_cell}/SUM({range_reference}))*100, 0)), "")'
+                        cell = ws2.cell(row=current_row, column=6, value=weight_bearing_formula)  # Column F
+                        cell.data_type = 'f'  # Explicitly set as formula
+    except Exception as e:
+        print(f"Error writing weight bearing formulae: {e}")
+        # Fill with default values if formula writing fails
+        for row in range(2, num_data_rows + 2):
+            ws2.cell(row=row, column=6, value="0")
 
 def write_asymmetry_formulae(ws2, num_data_rows):
-    """Write asymmetry index formulae for LF and LH rows only."""
-    # Asymmetry Index formula: IFERROR(ABS((x1-x3))/(AVERAGE(x1,x3)), "")
-    # Only for LF and LH rows (first and second row in each group)
-    
-    # Calculate how many complete groups we have
-    complete_groups = num_data_rows // 4
-    remaining_rows = num_data_rows % 4
-    
-    # Write formulas for complete groups
-    for group in range(complete_groups):
-        group_start = 2 + (group * 4)
+    """Write asymmetry index formulae for LF and LH rows only with error handling."""
+    try:
+        # Asymmetry Index formula: IFERROR(ABS((x1-x3))/(AVERAGE(x1,x3)), "")
+        # Only for LF and LH rows (first and second row in each group)
         
-        # LF row (first row in group): abs(x1-x3)/mean(x1, x3) where x1=LF, x3=RF
-        lf_row = group_start
-        rf_row = group_start + 2
-        if rf_row <= num_data_rows + 1:  # Make sure RF row exists
-            lf_formula = f'=IFERROR(ABS((B{lf_row}-B{rf_row}))/(AVERAGE(B{lf_row},B{rf_row})), "")'
-            cell = ws2.cell(row=lf_row, column=7, value=lf_formula)  # Column G
-            cell.data_type = 'f'  # Explicitly set as formula
+        # Calculate how many complete groups we have
+        complete_groups = num_data_rows // 4
+        remaining_rows = num_data_rows % 4
         
-        # LH row (second row in group): abs(x2-x4)/mean(x2, x4) where x2=LH, x4=RH
-        lh_row = group_start + 1
-        rh_row = group_start + 3
-        if rh_row <= num_data_rows + 1:  # Make sure RH row exists
-            lh_formula = f'=IFERROR(ABS((B{lh_row}-B{rh_row}))/(AVERAGE(B{lh_row},B{rh_row})), "")'
-            cell = ws2.cell(row=lh_row, column=7, value=lh_formula)  # Column G
-            cell.data_type = 'f'  # Explicitly set as formula
-    
-    # Handle remaining rows if we don't have complete groups
-    if remaining_rows > 0:
-        group_start = 2 + (complete_groups * 4)
-        
-        # If we have at least 2 rows, we can calculate LF asymmetry
-        if remaining_rows >= 2:
+        # Write formulas for complete groups
+        for group in range(complete_groups):
+            group_start = 2 + (group * 4)
+            
+            # LF row (first row in group): abs(x1-x3)/mean(x1, x3) where x1=LF, x3=RF
             lf_row = group_start
             rf_row = group_start + 2
-            if rf_row <= num_data_rows + 1:
-                lf_formula = f'=IFERROR(ABS((B{lf_row}-B{rf_row}))/(AVERAGE(B{lf_row},B{rf_row})), "")'
+            if rf_row <= num_data_rows + 1:  # Make sure RF row exists
+                # Enhanced formula with better error handling for division by zero
+                lf_formula = f'=IFERROR(IF(AVERAGE(B{lf_row},B{rf_row})=0, 0, ABS((B{lf_row}-B{rf_row}))/AVERAGE(B{lf_row},B{rf_row})), "")'
                 cell = ws2.cell(row=lf_row, column=7, value=lf_formula)  # Column G
                 cell.data_type = 'f'  # Explicitly set as formula
-        
-        # If we have at least 3 rows, we can calculate LH asymmetry
-        if remaining_rows >= 3:
+            
+            # LH row (second row in group): abs(x2-x4)/mean(x2, x4) where x2=LH, x4=RH
             lh_row = group_start + 1
             rh_row = group_start + 3
-            if rh_row <= num_data_rows + 1:
-                lh_formula = f'=IFERROR(ABS((B{lh_row}-B{rh_row}))/(AVERAGE(B{lh_row},B{rh_row})), "")'
+            if rh_row <= num_data_rows + 1:  # Make sure RH row exists
+                # Enhanced formula with better error handling for division by zero
+                lh_formula = f'=IFERROR(IF(AVERAGE(B{lh_row},B{rh_row})=0, 0, ABS((B{lh_row}-B{rh_row}))/AVERAGE(B{lh_row},B{rh_row})), "")'
                 cell = ws2.cell(row=lh_row, column=7, value=lh_formula)  # Column G
                 cell.data_type = 'f'  # Explicitly set as formula
+        
+        # Handle remaining rows if we don't have complete groups
+        if remaining_rows > 0:
+            group_start = 2 + (complete_groups * 4)
+            
+            # If we have at least 2 rows, we can calculate LF asymmetry
+            if remaining_rows >= 2:
+                lf_row = group_start
+                rf_row = group_start + 2
+                if rf_row <= num_data_rows + 1:
+                    lf_formula = f'=IFERROR(IF(AVERAGE(B{lf_row},B{rf_row})=0, 0, ABS((B{lf_row}-B{rf_row}))/AVERAGE(B{lf_row},B{rf_row})), "")'
+                    cell = ws2.cell(row=lf_row, column=7, value=lf_formula)  # Column G
+                    cell.data_type = 'f'  # Explicitly set as formula
+            
+            # If we have at least 3 rows, we can calculate LH asymmetry
+            if remaining_rows >= 3:
+                lh_row = group_start + 1
+                rh_row = group_start + 3
+                if rh_row <= num_data_rows + 1:
+                    lh_formula = f'=IFERROR(IF(AVERAGE(B{lh_row},B{rh_row})=0, 0, ABS((B{lh_row}-B{rh_row}))/AVERAGE(B{lh_row},B{rh_row})), "")'
+                    cell = ws2.cell(row=lh_row, column=7, value=lh_formula)  # Column G
+                    cell.data_type = 'f'  # Explicitly set as formula
+                    
+    except Exception as e:
+        print(f"Error writing asymmetry formulae: {e}")
+        # Fill with default values if formula writing fails
+        for row in range(2, num_data_rows + 2):
+            ws2.cell(row=row, column=7, value="0")
 
 def apply_coloring(ws2, num_data_rows):
     """Apply coloring to Data Source (column A) and Weight bearing columns (column F)."""
