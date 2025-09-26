@@ -124,7 +124,23 @@ PPA/
 - **streamlit**: Web application framework
 - **pandas**: Data manipulation and analysis
 - **openpyxl**: Excel file reading/writing
-- **xlrd**: Legacy Excel file support
+- **xlsxwriter**: Excel file writing
+- **reportlab**: PDF generation
+- **numpy**: Numerical computing
+
+## Deployment
+
+For cloud deployment platforms (Railway, Render, Heroku, etc.), use:
+```bash
+pip install -r requirements-deploy.txt
+```
+
+Or if using `uv` (modern Python package manager):
+```bash
+uv pip install -r requirements.txt
+```
+
+The project also includes a `pyproject.toml` file for modern Python tooling.
 
 ## Example
 
